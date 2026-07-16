@@ -4,5 +4,8 @@ dist/
 .DS_Store
 .claude
 
-# Written per-machine by `npm run install-client` — holds absolute paths.
+# Written per-machine by server/dist/install.js — holds absolute paths.
 .mcp.json
+
+# Datasets collected by walk_endpoint — real scraped rows, not source.
+/output/
