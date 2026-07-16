@@ -9,11 +9,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { EndpointRegistry } from "./registry.js";
 import type { InboundMessage } from "./types.js";
 
-const WS_PORT = Number(process.env.API_SCRAPER_WS_PORT ?? 8787);
+const WS_PORT = Number(process.env.SCRAPE_MCP_WS_PORT ?? 8787);
 
 // stdout carries the MCP protocol — everything else goes to stderr.
 function log(...args: unknown[]): void {
-  console.error("[api-scraper]", ...args);
+  console.error("[scrape-mcp]", ...args);
 }
 
 const registry = new EndpointRegistry();
@@ -22,6 +22,20 @@ const registry = new EndpointRegistry();
 
 function startWebSocket(): WebSocketServer {
   const wss = new WebSocketServer({ port: WS_PORT });
+
+  // Captures arrive in bursts (one per keystroke), so coalesce the pushes
+  // rather than re-sending the whole list for each one.
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const broadcast = () => {
+    if (pending) return;
+    pending = setTimeout(() => {
+      pending = undefined;
+      const msg = JSON.stringify({ type: "endpoints", endpoints: registry.list() });
+      for (const client of wss.clients) {
+        if (client.readyState === client.OPEN) client.send(msg);
+      }
+    }, 200);
+  };
 
   wss.on("connection", (socket) => {
     log("extension connected");
@@ -42,11 +56,16 @@ function startWebSocket(): WebSocketServer {
         case "capture": {
           const id = registry.ingest(msg.data);
           if (id) log(`captured ${msg.data.method} ${msg.data.url} -> ${id}`);
+          broadcast();
           break;
         }
         case "clear":
           registry.clear();
           log("registry cleared by extension");
+          broadcast();
+          break;
+        case "list":
+          socket.send(JSON.stringify({ type: "endpoints", endpoints: registry.list() }));
           break;
       }
     });
@@ -55,7 +74,21 @@ function startWebSocket(): WebSocketServer {
   });
 
   wss.on("listening", () => log(`listening for captures on ws://localhost:${WS_PORT}`));
-  wss.on("error", (err) => log("websocket error:", err));
+
+  wss.on("error", (err: NodeJS.ErrnoException) => {
+    // Without the port we can never receive a capture, so the registry would
+    // stay empty forever while still answering tool calls — an agent reading
+    // from this process would silently see nothing. Fail loudly instead.
+    if (err.code === "EADDRINUSE") {
+      log(
+        `FATAL: port ${WS_PORT} is already in use — another scrape-mcp server is ` +
+          `probably still running. Kill it (lsof -ti :${WS_PORT} | xargs kill) and retry.`,
+      );
+    } else {
+      log("FATAL: websocket error:", err);
+    }
+    process.exit(1);
+  });
 
   return wss;
 }
@@ -67,7 +100,7 @@ function json(value: unknown) {
 }
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: "api-scraper-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: "scrape-mcp", version: "0.1.0" });
 
   server.registerTool(
     "list_endpoints",

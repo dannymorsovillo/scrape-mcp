@@ -1,10 +1,10 @@
 {
-  "name": "api-scraper-mcp-server",
+  "name": "scrape-mcp-server",
   "version": "0.1.0",
   "description": "Bridge that receives scraped API endpoints over WebSocket and exposes them to AI agents as MCP tools",
   "type": "module",
   "bin": {
-    "api-scraper-mcp": "./dist/index.js"
+    "scrape-mcp": "./dist/index.js"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
