@@ -112,6 +112,35 @@ function json(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
+function toolError(text: string) {
+  return { content: [{ type: "text" as const, text }], isError: true as const };
+}
+
+/** Placeholders templatePath() produces: {id}, {uuid}, {hash}. */
+const PLACEHOLDER_RE = /^\{[a-z]+\}$/;
+
+/**
+ * True if `pathname` is `template` with its placeholders filled in: same segment
+ * count, literal segments equal, placeholders matching any one non-empty segment.
+ *
+ * Replay carries the endpoint's real credentials, so without this an agent could
+ * name a harmless captured endpoint and send the cookie anywhere else on the
+ * origin — /admin/users off the back of a search call.
+ */
+function pathMatchesTemplate(pathname: string, template: string): boolean {
+  let decoded: string;
+  try {
+    // new URL() percent-encodes the braces, so /x/{id} arrives as /x/%7Bid%7D.
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return false; // malformed escape — nothing legitimate looks like this
+  }
+  const got = decoded.split("/");
+  const want = template.split("/");
+  if (got.length !== want.length) return false;
+  return want.every((seg, i) => (PLACEHOLDER_RE.test(seg) ? got[i] !== "" : got[i] === seg));
+}
+
 function buildServer(): McpServer {
   const server = new McpServer({ name: "scrape-mcp", version: "0.1.0" });
 
@@ -186,7 +215,27 @@ function buildServer(): McpServer {
         };
       }
 
+      // `path` is agent-controlled, and new URL() lets an absolute or
+      // protocol-relative value ("https://evil.com", "//evil.com") discard the
+      // base entirely — which would send this endpoint's credentials to a host
+      // we never captured. Resolve first, then check where we actually landed.
       const url = new URL(path ?? ep.pathTemplate, ep.origin);
+      if (url.origin !== ep.origin) {
+        return toolError(
+          `path must stay on ${ep.origin} (got ${url.origin}). ` +
+            `Pass a path like ${ep.pathTemplate}, not a full URL.`,
+        );
+      }
+      // Checked against the resolved pathname, not the raw input, so that
+      // traversal like /a/../admin is normalized before it's compared.
+      if (!pathMatchesTemplate(url.pathname, ep.pathTemplate)) {
+        return toolError(
+          `path ${url.pathname} doesn't match this endpoint's ${ep.pathTemplate}. ` +
+            `Fill in the placeholders; don't change the shape. ` +
+            `Use list_endpoints to find the endpoint you want.`,
+        );
+      }
+
       for (const [k, v] of Object.entries(query ?? {})) {
         url.searchParams.set(k, v);
       }
