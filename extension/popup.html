@@ -4,73 +4,101 @@
     <meta charset="utf-8" />
     <style>
       body {
-        width: 240px;
+        width: 300px;
         margin: 0;
-        padding: 14px;
+        padding: 18px 16px;
+        border-top: 4px solid #e8112d;
         font: 13px/1.4 system-ui, sans-serif;
+        color: #1a1a1a;
       }
       h1 {
-        margin: 0 0 10px;
-        font-size: 13px;
-        font-weight: 600;
+        margin: 0 0 4px;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      #tagline {
+        margin: 0 0 14px;
+        font-size: 12px;
+        color: #6b6b6b;
       }
       .row {
         display: flex;
         align-items: center;
-        gap: 6px;
-        margin-bottom: 4px;
-        color: #555;
+        gap: 8px;
+        margin-bottom: 6px;
+        color: #333;
+      }
+      .row:last-child {
+        margin-bottom: 0;
       }
       #status {
-        margin-bottom: 10px;
+        margin-bottom: 14px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #f4f4f4;
       }
       /* The agent is reported by the server, so it can't be known while the
          bridge is down — show it as unknown rather than as absent. */
       #status.offline #agent {
         color: #aaa;
       }
+      #status.offline #agent-dot {
+        background: #bbb;
+      }
       .dot {
-        width: 8px;
-        height: 8px;
+        width: 9px;
+        height: 9px;
         border-radius: 50%;
-        background: #c33;
+        background: #e8112d;
         flex: none;
       }
       .dot.on {
-        background: #2a2;
+        background: #1a9e4b;
       }
       button {
         width: 100%;
-        padding: 7px;
-        margin-bottom: 6px;
-        border: 1px solid #ccc;
-        border-radius: 5px;
-        background: #f6f6f6;
-        font: inherit;
+        padding: 10px;
+        margin-bottom: 8px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: #e8112d;
+        color: #fff;
+        font: 600 13px/1.2 system-ui, sans-serif;
         cursor: pointer;
       }
       button:hover {
-        background: #eee;
+        background: #cc0f28;
       }
       button.active {
-        border-color: #2a2;
-        color: #2a2;
+        background: #1a1a1a;
+      }
+      button.active:hover {
+        background: #333;
+      }
+      #clear {
+        border-color: #d5d5d5;
+        background: #fff;
+        color: #1a1a1a;
+      }
+      #clear:hover {
+        background: #f4f4f4;
       }
       #error {
         margin: 6px 0 0;
-        color: #c33;
+        color: #e8112d;
         font-size: 12px;
       }
       #error:empty {
         display: none;
       }
       h2 {
-        margin: 12px 0 6px;
-        font-size: 11px;
-        font-weight: 600;
-        color: #888;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        margin: 0 0 10px;
+        padding-top: 14px;
+        border-top: 1px solid #e2e2e2;
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
       }
       #list {
         max-height: 260px;
@@ -111,14 +139,24 @@
         color: #b80;
       }
       #empty {
-        color: #999;
+        padding: 12px;
+        border-radius: 8px;
+        background: #f4f4f4;
         font-size: 12px;
-        padding: 4px 0;
+      }
+      #empty b {
+        display: block;
+        margin-bottom: 3px;
+        font-weight: 600;
+      }
+      #empty span {
+        color: #6b6b6b;
       }
     </style>
   </head>
   <body>
     <h1>Scrape MCP</h1>
+    <p id="tagline">Capture website APIs for your agent</p>
     <div id="status">
       <div class="row"><span class="dot" id="dot"></span><span id="conn">Bridge offline</span></div>
       <div class="row"><span class="dot" id="agent-dot"></span><span id="agent">No agent attached</span></div>
@@ -127,7 +165,10 @@
     <button id="clear">Clear captured</button>
     <p id="error"></p>
     <h2 id="heading">Endpoints</h2>
-    <div id="empty">Nothing captured yet.</div>
+    <div id="empty">
+      <b>Nothing captured yet</b>
+      <span>Start capturing, then use the current tab.</span>
+    </div>
     <div id="list"></div>
     <script src="popup.js"></script>
   </body>
