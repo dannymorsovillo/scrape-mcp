@@ -23,6 +23,9 @@ let reconnectTimer = null;
 /** Latest registry view pushed by the server. Rendered by the popup. */
 let endpoints = [];
 
+/** The MCP client attached to the server, or null if none has handshaken. */
+let agent = null;
+
 // --- bridge socket ----------------------------------------------------------
 
 function connect() {
@@ -47,6 +50,7 @@ function connect() {
     }
     if (msg.type === "endpoints") {
       endpoints = msg.endpoints;
+      agent = msg.agent ?? null;
       broadcastStatus();
     }
   });
@@ -54,7 +58,9 @@ function connect() {
   socket.addEventListener("close", () => {
     // The registry lives in the server process; if it went away, whatever we
     // cached is no longer true. Better to show nothing than something stale.
+    // The agent was attached to that process too, so it's gone with it.
     endpoints = [];
+    agent = null;
     broadcastStatus();
     scheduleReconnect();
   });
@@ -191,6 +197,7 @@ function statusFor(tabId) {
     connected: socket?.readyState === WebSocket.OPEN,
     capturing: attached.has(tabId),
     endpoints,
+    agent,
   };
 }
 

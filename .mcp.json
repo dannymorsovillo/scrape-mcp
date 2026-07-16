@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "scrape-mcp": {
-      "command": "node",
-      "args": ["/Users/danny/scrape-mcp/server/dist/index.js"]
-    }
-  }
-}

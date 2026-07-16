@@ -18,8 +18,16 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        margin-bottom: 10px;
+        margin-bottom: 4px;
         color: #555;
+      }
+      #status {
+        margin-bottom: 10px;
+      }
+      /* The agent is reported by the server, so it can't be known while the
+         bridge is down — show it as unknown rather than as absent. */
+      #status.offline #agent {
+        color: #aaa;
       }
       .dot {
         width: 8px;
@@ -111,7 +119,10 @@
   </head>
   <body>
     <h1>Scrape MCP</h1>
-    <div class="row"><span class="dot" id="dot"></span><span id="conn">Bridge offline</span></div>
+    <div id="status">
+      <div class="row"><span class="dot" id="dot"></span><span id="conn">Bridge offline</span></div>
+      <div class="row"><span class="dot" id="agent-dot"></span><span id="agent">No agent attached</span></div>
+    </div>
     <button id="toggle">Start capturing</button>
     <button id="clear">Clear captured</button>
     <p id="error"></p>

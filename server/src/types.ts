@@ -22,6 +22,12 @@ export interface ListMessage {
 
 export type InboundMessage = CaptureMessage | HelloMessage | ClearMessage | ListMessage;
 
+/** The MCP client on the other end of stdio, as it identified itself. */
+export interface AgentInfo {
+  name: string;
+  version?: string;
+}
+
 /**
  * Server -> extension. Carries EndpointSummary, the same redacted view the
  * agent gets, so the popup can never render a credential value.
@@ -29,6 +35,11 @@ export type InboundMessage = CaptureMessage | HelloMessage | ClearMessage | List
 export interface EndpointsMessage {
   type: "endpoints";
   endpoints: EndpointSummary[];
+  /**
+   * Absent until an MCP client completes the handshake — and forever under
+   * `npm run dev`, where stdio is a terminal and nothing ever initializes.
+   */
+  agent?: AgentInfo;
 }
 
 export type OutboundMessage = EndpointsMessage;
