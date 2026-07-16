@@ -4,24 +4,36 @@
 
 Turns the APIs a website uses into tools an AI agent can explore.
 
-The data you want already arrived as clean JSON — the page called an endpoint to
-get it. That endpoint just isn't documented, and isn't meant for you. So reaching
-it means opening DevTools, squinting at the Network tab, and reconstructing
-requests by hand: which endpoint, which parameters, what comes back, which cookie
-makes it work. Scraping the rendered HTML instead means parsing the presentation
-of data that was structured one layer up, and rewriting it after the next
-redesign.
+## The problem
 
-A browser extension watches the calls a page makes and streams them to a local
-server, which exposes what it learned over **MCP** — the Model Context Protocol,
-the standard that lets AI clients like Claude Code, Cursor, or Gemini CLI
-discover and call external tools. Click around a site for thirty seconds and an
-agent can ask what endpoints exist, what they return, and replay them with
-different parameters, through your existing session — so auth is solved by not
-being a problem.
+Search, filter, or scroll on a modern website and the page never reloads. It
+quietly calls an API, gets back clean JSON, and renders it for your eyes. That
+API is real and it works — it's how the site itself gets its data. It's just
+undocumented, unannounced, and not meant for you.
 
-Nothing to configure or describe: you use the site, and what you touched becomes
-tools.
+So when you want that data — an export the vendor never built, a report nobody
+can hand you, 4,000 records behind a screen that shows 20 at a time — the usual
+options are all bad:
+
+| Approach | Why it hurts |
+|---|---|
+| Scrape the HTML | You parse the *presentation* of data that was structured one layer up — then rewrite your parser after the next redesign. |
+| Drive a browser | Automation and computer-use agents work, but you're paying a model to read numbers off a screenshot that arrived as JSON. |
+| Use the official API | Wonderful when it exists. For internal tools and vendor dashboards, it doesn't. |
+| Read the docs | Assumes docs. |
+
+Notice what the real problem *isn't*. It isn't access — you're already logged in,
+and your browser already made the call successfully. It's that knowing **which**
+call, with which parameters, returning what shape, means opening DevTools and
+reconstructing it by hand. The data was one layer beneath the page the whole
+time. The knowledge of how to ask for it is what's missing.
+
+## What it does
+
+You use the website normally. A browser extension watches the API calls the page
+makes and streams them to a local server, which hands what it learned to your AI
+agent over **MCP** — the Model Context Protocol, the standard that lets clients
+like Claude Code, Cursor, or Gemini CLI discover and call external tools.
 
 ```
 Browser tab                Extension             Bridge server          Agent
@@ -43,6 +55,34 @@ Requests aren't just logged. They're collapsed into distinct endpoints
 (`/users/42/posts` and `/users/43/posts` become one `/users/{id}/posts`), counted,
 and a JSON Schema — a machine-readable description of a response's shape — is
 inferred from the bodies observed.
+
+Thirty seconds of clicking, and your agent can ask what endpoints exist, what
+they return, and call them again with different values: page 2, a different
+search term, all 4,000 records.
+
+## Why it matters
+
+- **Discovery by demonstration.** You never configure or describe anything. You
+  click, and what you touched becomes tools. The tedious part — reading the
+  Network tab and reconstructing requests — is the part that's automated.
+- **Structured, not scraped.** You get JSON and an inferred schema, not DOM
+  archaeology. A redesign doesn't break it; only a real API change does.
+- **Auth is solved by not being a problem.** It reuses the session you already
+  have. No keys to request, no OAuth flow, no permission to ask for.
+- **Any client, any model.** MCP is a client-side protocol and this server never
+  talks to a model, so it works with Claude Code, Cursor, Gemini CLI, Zed and the
+  rest, whichever model they're driving.
+
+**Where it works.** Modern single-page apps are ideal: if clicking feels instant
+and the page never flashes white, there's an API underneath and you'll capture
+it. Old server-rendered sites, where every click reloads the page, produce
+nothing — the data arrived baked into the HTML and there was no API call to
+catch. Live data pushed over WebSockets isn't captured either. See
+[Gotchas](#gotchas).
+
+**The honest caveat.** Replay acts with your login, so it can do anything you can
+do. Rate limits and terms of service are your problem, and this is only as
+legitimate as the access you already had.
 
 ## How the agent connects
 
@@ -281,7 +321,11 @@ that doesn't require the agent to be malicious, only obedient.
   fails if DevTools is open on it. The popup shows the error.
 - **Captures are lost on restart.** In-memory only; nothing is written to disk.
 - **Reloading the extension detaches the debugger.** Hit **Start** again.
-- **Only XHR and fetch** are captured — a static page produces nothing.
+- **Only XHR and fetch** are captured. A server-rendered page produces nothing —
+  the data came baked into the HTML and no API call was made. Full-page
+  navigations are `Document` requests and are skipped, as are **WebSocket and
+  SSE** streams: a site pushing live data over a socket will capture nothing at
+  all, however much traffic you can see moving.
 - **Numeric path segments become `{id}`**, so a version prefix like `/1/indexes/`
   templates to `/{id}/indexes/`.
 - Chrome shows a **"started debugging this browser"** banner while capturing.
