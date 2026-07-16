@@ -7,7 +7,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { EndpointRegistry } from "./registry.js";
-import type { InboundMessage } from "./types.js";
+import type { AgentInfo, EndpointsMessage, InboundMessage } from "./types.js";
 
 const WS_PORT = Number(process.env.SCRAPE_MCP_WS_PORT ?? 8787);
 
@@ -18,24 +18,37 @@ function log(...args: unknown[]): void {
 
 const registry = new EndpointRegistry();
 
+// The MCP client that spawned us, once it has completed the handshake. stdio
+// admits exactly one, fixed for the life of the process — so this is a fact to
+// report, not a choice anything gets to make.
+let agent: AgentInfo | undefined;
+
+let wss: WebSocketServer | undefined;
+
+/** Everything the popup renders. The same shape whether pushed or requested. */
+function state(): EndpointsMessage {
+  return { type: "endpoints", endpoints: registry.list(), agent };
+}
+
+// Captures arrive in bursts (one per keystroke), so coalesce the pushes
+// rather than re-sending the whole list for each one.
+let pending: ReturnType<typeof setTimeout> | undefined;
+function broadcast(): void {
+  if (!wss || pending) return;
+  const server = wss;
+  pending = setTimeout(() => {
+    pending = undefined;
+    const msg = JSON.stringify(state());
+    for (const client of server.clients) {
+      if (client.readyState === client.OPEN) client.send(msg);
+    }
+  }, 200);
+}
+
 // --- WebSocket ingest -------------------------------------------------------
 
 function startWebSocket(): WebSocketServer {
-  const wss = new WebSocketServer({ port: WS_PORT });
-
-  // Captures arrive in bursts (one per keystroke), so coalesce the pushes
-  // rather than re-sending the whole list for each one.
-  let pending: ReturnType<typeof setTimeout> | undefined;
-  const broadcast = () => {
-    if (pending) return;
-    pending = setTimeout(() => {
-      pending = undefined;
-      const msg = JSON.stringify({ type: "endpoints", endpoints: registry.list() });
-      for (const client of wss.clients) {
-        if (client.readyState === client.OPEN) client.send(msg);
-      }
-    }, 200);
-  };
+  wss = new WebSocketServer({ port: WS_PORT });
 
   wss.on("connection", (socket) => {
     log("extension connected");
@@ -65,7 +78,7 @@ function startWebSocket(): WebSocketServer {
           broadcast();
           break;
         case "list":
-          socket.send(JSON.stringify({ type: "endpoints", endpoints: registry.list() }));
+          socket.send(JSON.stringify(state()));
           break;
       }
     });
@@ -228,6 +241,21 @@ function buildServer(): McpServer {
 async function main(): Promise<void> {
   startWebSocket();
   const server = buildServer();
+
+  // clientInfo only exists once the client has sent `initialize`, so the name
+  // can't be read at connect time — it has to be picked up from the handshake.
+  server.server.oninitialized = () => {
+    const info = server.server.getClientVersion();
+    agent = info ? { name: info.name, version: info.version } : undefined;
+    log(`agent attached: ${info ? `${info.name} ${info.version ?? ""}`.trim() : "unidentified"}`);
+    broadcast();
+  };
+
+  server.server.onclose = () => {
+    agent = undefined;
+    broadcast();
+  };
+
   await server.connect(new StdioServerTransport());
   log("MCP server ready on stdio");
 }

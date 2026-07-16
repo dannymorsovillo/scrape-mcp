@@ -4,7 +4,8 @@
   "description": "Bridge that receives scraped API endpoints over WebSocket and exposes them to AI agents as MCP tools",
   "type": "module",
   "bin": {
-    "scrape-mcp": "./dist/index.js"
+    "scrape-mcp": "./dist/index.js",
+    "scrape-mcp-install": "./dist/install.js"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",

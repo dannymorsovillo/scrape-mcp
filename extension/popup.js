@@ -1,5 +1,8 @@
 const dot = document.getElementById("dot");
 const conn = document.getElementById("conn");
+const statusBox = document.getElementById("status");
+const agentDot = document.getElementById("agent-dot");
+const agentText = document.getElementById("agent");
 const toggle = document.getElementById("toggle");
 const clear = document.getElementById("clear");
 const error = document.getElementById("error");
@@ -42,10 +45,17 @@ function renderList(endpoints) {
   }
 }
 
-function render({ connected, capturing: isCapturing, endpoints = [] }) {
+function render({ connected, capturing: isCapturing, endpoints = [], agent = null }) {
   capturing = isCapturing;
   dot.classList.toggle("on", connected);
   conn.textContent = connected ? "Bridge connected" : "Bridge offline";
+  statusBox.classList.toggle("offline", !connected);
+  agentDot.classList.toggle("on", !!agent);
+  agentText.textContent = !connected
+    ? "Agent unknown"
+    : agent
+      ? `Agent: ${[agent.name, agent.version].filter(Boolean).join(" ")}`
+      : "No agent attached";
   toggle.textContent = isCapturing ? "Stop capturing" : "Start capturing";
   toggle.classList.toggle("active", isCapturing);
   renderList(endpoints);
