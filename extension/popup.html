@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        width: 240px;
+        margin: 0;
+        padding: 14px;
+        font: 13px/1.4 system-ui, sans-serif;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 10px;
+        color: #555;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #c33;
+        flex: none;
+      }
+      .dot.on {
+        background: #2a2;
+      }
+      button {
+        width: 100%;
+        padding: 7px;
+        margin-bottom: 6px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background: #f6f6f6;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #eee;
+      }
+      button.active {
+        border-color: #2a2;
+        color: #2a2;
+      }
+      #error {
+        margin: 6px 0 0;
+        color: #c33;
+        font-size: 12px;
+      }
+      #error:empty {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>API Scraper</h1>
+    <div class="row"><span class="dot" id="dot"></span><span id="conn">Bridge offline</span></div>
+    <button id="toggle">Start capturing</button>
+    <button id="clear">Clear captured</button>
+    <p id="error"></p>
+    <script src="popup.js"></script>
+  </body>
+</html>
