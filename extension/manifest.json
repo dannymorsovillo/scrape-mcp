@@ -1,16 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "API Scraper",
+  "name": "Scrape MCP",
   "version": "0.1.0",
-  "description": "Captures XHR/fetch API calls on the current tab and streams them to the local api-scraper-mcp bridge.",
+  "description": "Captures XHR/fetch API calls on the current tab and streams them to the local scrape-mcp bridge.",
   "permissions": ["debugger", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+
+   "icons": {
+    "16": "icon16.png"
+  },
+
   "action": {
     "default_popup": "popup.html",
-    "default_title": "API Scraper"
+    "default_title": "Scrape MCP",
+    "default_icon": {
+      "16": "icon16.png"
+    }
   }
 }

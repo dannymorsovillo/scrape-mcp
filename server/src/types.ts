@@ -15,7 +15,23 @@ export interface ClearMessage {
   type: "clear";
 }
 
-export type InboundMessage = CaptureMessage | HelloMessage | ClearMessage;
+/** Extension asking for the current registry contents (e.g. popup opened). */
+export interface ListMessage {
+  type: "list";
+}
+
+export type InboundMessage = CaptureMessage | HelloMessage | ClearMessage | ListMessage;
+
+/**
+ * Server -> extension. Carries EndpointSummary, the same redacted view the
+ * agent gets, so the popup can never render a credential value.
+ */
+export interface EndpointsMessage {
+  type: "endpoints";
+  endpoints: EndpointSummary[];
+}
+
+export type OutboundMessage = EndpointsMessage;
 
 /** Raw captured call as produced by the extension's debugger/network listener. */
 export interface CapturedCall {

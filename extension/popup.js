@@ -3,6 +3,9 @@ const conn = document.getElementById("conn");
 const toggle = document.getElementById("toggle");
 const clear = document.getElementById("clear");
 const error = document.getElementById("error");
+const list = document.getElementById("list");
+const empty = document.getElementById("empty");
+const heading = document.getElementById("heading");
 
 let tabId = null;
 let capturing = false;
@@ -12,12 +15,40 @@ async function currentTabId() {
   return tab?.id ?? null;
 }
 
-function render({ connected, capturing: isCapturing }) {
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  // textContent, never innerHTML: paths and hosts come from whatever site the
+  // user was browsing, so treating them as markup would be an XSS hole.
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function renderList(endpoints) {
+  list.textContent = "";
+  heading.textContent = endpoints.length
+    ? `Endpoints (${endpoints.length})`
+    : "Endpoints";
+  empty.style.display = endpoints.length ? "none" : "";
+
+  for (const ep of endpoints) {
+    const row = el("div", "ep");
+    const top = el("div", "ep-top");
+    top.append(el("span", "verb", ep.method), el("span", "path", ep.pathTemplate));
+    if (ep.requiresAuth) top.append(el("span", "lock", "AUTH"));
+    top.append(el("span", "count", `x${ep.seenCount}`));
+    row.append(top, el("div", "host", ep.origin.replace(/^https?:\/\//, "")));
+    list.append(row);
+  }
+}
+
+function render({ connected, capturing: isCapturing, endpoints = [] }) {
   capturing = isCapturing;
   dot.classList.toggle("on", connected);
   conn.textContent = connected ? "Bridge connected" : "Bridge offline";
   toggle.textContent = isCapturing ? "Stop capturing" : "Start capturing";
   toggle.classList.toggle("active", isCapturing);
+  renderList(endpoints);
 }
 
 async function refresh() {

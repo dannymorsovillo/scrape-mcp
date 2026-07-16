@@ -20,6 +20,9 @@ const inflight = new Map();
 let socket = null;
 let reconnectTimer = null;
 
+/** Latest registry view pushed by the server. Rendered by the popup. */
+let endpoints = [];
+
 // --- bridge socket ----------------------------------------------------------
 
 function connect() {
@@ -29,12 +32,29 @@ function connect() {
   socket = new WebSocket(WS_URL);
 
   socket.addEventListener("open", () => {
-    console.log("[api-scraper] bridge connected");
+    console.log("[scrape-mcp] bridge connected");
     send({ type: "hello", extensionVersion: EXTENSION_VERSION });
+    send({ type: "list" }); // sync whatever the registry already holds
     broadcastStatus();
   });
 
+  socket.addEventListener("message", (event) => {
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (msg.type === "endpoints") {
+      endpoints = msg.endpoints;
+      broadcastStatus();
+    }
+  });
+
   socket.addEventListener("close", () => {
+    // The registry lives in the server process; if it went away, whatever we
+    // cached is no longer true. Better to show nothing than something stale.
+    endpoints = [];
     broadcastStatus();
     scheduleReconnect();
   });
@@ -166,10 +186,11 @@ function lowerKeys(headers) {
 
 // --- popup messaging --------------------------------------------------------
 
-function status(tabId) {
+function statusFor(tabId) {
   return {
     connected: socket?.readyState === WebSocket.OPEN,
     capturing: attached.has(tabId),
+    endpoints,
   };
 }
 
@@ -182,19 +203,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     switch (msg.type) {
       case "get-status":
-        sendResponse(status(msg.tabId));
+        sendResponse(statusFor(msg.tabId));
         return;
       case "start":
         try {
           await attach(msg.tabId);
-          sendResponse({ ok: true, ...status(msg.tabId) });
+          sendResponse({ ok: true, ...statusFor(msg.tabId) });
         } catch (err) {
           sendResponse({ ok: false, error: String(err?.message ?? err) });
         }
         return;
       case "stop":
         await detach(msg.tabId);
-        sendResponse({ ok: true, ...status(msg.tabId) });
+        sendResponse({ ok: true, ...statusFor(msg.tabId) });
         return;
       case "clear":
         sendResponse({ ok: send({ type: "clear" }) });
