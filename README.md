@@ -266,8 +266,45 @@ These are what your agent can call once it's attached.
 |---|---|
 | `list_endpoints` | Everything found, most-seen first. Optional `host` filter. |
 | `get_endpoint` | One endpoint in full: schemas, sample bodies, statuses. |
-| `replay_endpoint` | Re-issue a request with your captured credentials. |
+| `replay_endpoint` | Re-issue one request with your captured credentials. |
+| `walk_endpoint` | Collect a whole paginated dataset to a file. |
 | `clear_endpoints` | Empty the registry. |
+
+### Collecting a dataset
+
+`walk_endpoint` is the bulk version of replay: it follows a pagination parameter,
+one request per page, and stops on an empty page, a non-2xx response, or
+`maxPages`.
+
+It returns a summary and a file path — **not the rows**. A few thousand records
+would otherwise land in the agent's context, which is slow, expensive, and
+truncated at 50,000 characters anyway. The agent gets a receipt and reads the
+file when it needs to:
+
+```jsonc
+{ "pages": 3, "rows": 1394, "file": "/path/to/scrape-mcp/output/…json",
+  "itemsPath": "hits", "stopped": "empty page at 3", "sample": { … } }
+```
+
+Datasets are written to `output/` in the repo, named by host and path. It's
+gitignored — collected rows are real data, and not something to commit. The
+folder is located relative to the server file itself, not the working directory,
+so it lands in the same place whichever client spawned the server.
+
+**Try a bigger page first.** A UI asks for 20 rows because that's what fits on
+screen; the API often allows 1,000. Check `queryParams` for `hitsPerPage`,
+`per_page`, or `limit` — one request beats fifty, and it's a good demo of an
+agent using a capability the site's own frontend never does.
+
+Tell it where the rows live with `itemsPath` (`"hits"`, `"data.items"`), or omit
+it and the first array in the response is used — the guess is reported back so
+you can correct it. `pageParam` defaults to `page`; for offset-style APIs, set
+`pageParam: "offset"` and `pageStep` to the page size.
+
+Walking issues real requests carrying your session, so it's capped (10 pages by
+default, 100 hard) and paced ~200ms apart, and it stops on the first non-2xx
+rather than pushing through a 429. Retrying through rate limits with your own
+cookie is how accounts get locked.
 
 ## Credentials
 
@@ -392,6 +429,8 @@ server/src/      index.ts       MCP tools + WebSocket listener
 
 ## Status
 
-Early. Capture, dedup, schema inference, and the credential boundary work
-end-to-end. Not yet built: persistence, multi-tab capture, and handling for
-credentials in path segments or request bodies.
+Early. Capture, dedup, schema inference, the credential boundary, and paginated
+collection work end-to-end. Not yet built: persistence of the registry itself
+(captures are still lost on restart), multi-tab capture, cursor-based pagination
+in `walk_endpoint`, and handling for credentials in path segments or request
+bodies.

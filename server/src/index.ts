@@ -2,12 +2,15 @@
 // Entry point: runs the MCP server on stdio and a WebSocket listener that the
 // Chrome extension pushes captured calls into.
 
+import { mkdir, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { EndpointRegistry } from "./registry.js";
-import type { AgentInfo, EndpointsMessage, InboundMessage } from "./types.js";
+import type { AgentInfo, Endpoint, EndpointsMessage, InboundMessage } from "./types.js";
 
 const WS_PORT = Number(process.env.SCRAPE_MCP_WS_PORT ?? 8787);
 
@@ -116,6 +119,20 @@ function toolError(text: string) {
   return { content: [{ type: "text" as const, text }], isError: true as const };
 }
 
+/**
+ * Collected datasets land in <repo>/output. Resolved from this file rather than
+ * the working directory: the client spawns this server, so cwd is whatever the
+ * client happened to be in and "./output" would land somewhere different for
+ * each one. Gitignored — the rows are real data, not something to commit.
+ */
+const OUTPUT_DIR = resolve(fileURLToPath(import.meta.url), "../../../output");
+
+// A walk issues real requests carrying the user's session, so it gets a leash
+// the single-shot replay doesn't need: a cap, and a pause between pages.
+const WALK_PAGE_LIMIT = 100;
+const WALK_DEFAULT_PAGES = 10;
+const WALK_DELAY_MS = 200;
+
 /** Placeholders templatePath() produces: {id}, {uuid}, {hash}. */
 const PLACEHOLDER_RE = /^\{[a-z]+\}$/;
 
@@ -140,6 +157,62 @@ function pathMatchesTemplate(pathname: string, template: string): boolean {
   if (got.length !== want.length) return false;
   return want.every((seg, i) => (PLACEHOLDER_RE.test(seg) ? got[i] !== "" : got[i] === seg));
 }
+
+/**
+ * Resolve an agent-supplied path against an endpoint, enforcing both guards.
+ * Shared by replay and walk so a looping tool can't sidestep them.
+ */
+function resolveUrl(ep: Endpoint, path?: string): { url: URL } | { error: string } {
+  const url = new URL(path ?? ep.pathTemplate, ep.origin);
+  if (url.origin !== ep.origin) {
+    return {
+      error:
+        `path must stay on ${ep.origin} (got ${url.origin}). ` +
+        `Pass a path like ${ep.pathTemplate}, not a full URL.`,
+    };
+  }
+  if (!pathMatchesTemplate(url.pathname, ep.pathTemplate)) {
+    return {
+      error:
+        `path ${url.pathname} doesn't match this endpoint's ${ep.pathTemplate}. ` +
+        `Fill in the placeholders; don't change the shape. ` +
+        `Use list_endpoints to find the endpoint you want.`,
+    };
+  }
+  return { url };
+}
+
+/** Walk a dot path ("data.items") into a parsed body. */
+function getByPath(obj: unknown, path: string): unknown {
+  if (path === "") return obj;
+  return path
+    .split(".")
+    .reduce<unknown>(
+      (acc, key) => (acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined),
+      obj,
+    );
+}
+
+/**
+ * Locate the array of rows in a response. With no itemsPath, guess: the body
+ * itself, else its first array-valued key. The guess is reported back so the
+ * agent can correct it rather than silently collect the wrong field.
+ */
+function findItems(body: unknown, itemsPath?: string): { items: unknown[]; path: string } | undefined {
+  if (itemsPath !== undefined) {
+    const found = getByPath(body, itemsPath);
+    return Array.isArray(found) ? { items: found, path: itemsPath } : undefined;
+  }
+  if (Array.isArray(body)) return { items: body, path: "" };
+  if (body && typeof body === "object") {
+    for (const [key, value] of Object.entries(body)) {
+      if (Array.isArray(value)) return { items: value, path: key };
+    }
+  }
+  return undefined;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function buildServer(): McpServer {
   const server = new McpServer({ name: "scrape-mcp", version: "0.1.0" });
@@ -215,26 +288,9 @@ function buildServer(): McpServer {
         };
       }
 
-      // `path` is agent-controlled, and new URL() lets an absolute or
-      // protocol-relative value ("https://evil.com", "//evil.com") discard the
-      // base entirely — which would send this endpoint's credentials to a host
-      // we never captured. Resolve first, then check where we actually landed.
-      const url = new URL(path ?? ep.pathTemplate, ep.origin);
-      if (url.origin !== ep.origin) {
-        return toolError(
-          `path must stay on ${ep.origin} (got ${url.origin}). ` +
-            `Pass a path like ${ep.pathTemplate}, not a full URL.`,
-        );
-      }
-      // Checked against the resolved pathname, not the raw input, so that
-      // traversal like /a/../admin is normalized before it's compared.
-      if (!pathMatchesTemplate(url.pathname, ep.pathTemplate)) {
-        return toolError(
-          `path ${url.pathname} doesn't match this endpoint's ${ep.pathTemplate}. ` +
-            `Fill in the placeholders; don't change the shape. ` +
-            `Use list_endpoints to find the endpoint you want.`,
-        );
-      }
+      const resolved = resolveUrl(ep, path);
+      if ("error" in resolved) return toolError(resolved.error);
+      const { url } = resolved;
 
       for (const [k, v] of Object.entries(query ?? {})) {
         url.searchParams.set(k, v);
@@ -266,6 +322,132 @@ function buildServer(): McpServer {
           isError: true,
         };
       }
+    },
+  );
+
+  server.registerTool(
+    "walk_endpoint",
+    {
+      description:
+        "Collect a whole paginated dataset from one endpoint and write it to a file. " +
+        "Issues one request per page, following the pagination parameter you name, and stops " +
+        "on an empty page, a non-2xx response, or maxPages. Returns a summary and the file " +
+        "path — not the rows — so a large dataset never enters the conversation. " +
+        "Before using this, check whether the endpoint accepts a larger page size " +
+        "(hitsPerPage, per_page, limit): one big request beats fifty small ones.",
+      inputSchema: {
+        id: z.string().describe("Endpoint id from list_endpoints."),
+        path: z.string().optional().describe("Concrete path, if the template has placeholders."),
+        query: z
+          .record(z.string())
+          .optional()
+          .describe("Query parameters held constant across pages (filters, search terms)."),
+        pageParam: z
+          .string()
+          .default("page")
+          .describe("Query parameter to increment per page, e.g. page, offset, skip."),
+        startPage: z.number().int().default(0).describe("First value for pageParam."),
+        pageStep: z
+          .number()
+          .int()
+          .default(1)
+          .describe("Amount to add per page. Use 1 for page numbers, the page size for offsets."),
+        maxPages: z
+          .number()
+          .int()
+          .optional()
+          .describe(`Stop after this many requests. Default ${WALK_DEFAULT_PAGES}, hard cap ${WALK_PAGE_LIMIT}.`),
+        itemsPath: z
+          .string()
+          .optional()
+          .describe('Dot path to the array of rows, e.g. "hits" or "data.items". Guessed if omitted.'),
+      },
+    },
+    async ({ id, path, query, pageParam, startPage, pageStep, maxPages, itemsPath }) => {
+      const ep = registry.get(id);
+      if (!ep) return toolError(`No endpoint with id ${id}.`);
+
+      const resolved = resolveUrl(ep, path);
+      if ("error" in resolved) return toolError(resolved.error);
+
+      const limit = Math.min(maxPages ?? WALK_DEFAULT_PAGES, WALK_PAGE_LIMIT);
+      const rows: unknown[] = [];
+      let pages = 0;
+      let usedItemsPath = itemsPath ?? "";
+      let stopped = `reached maxPages (${limit})`;
+
+      for (let i = 0; i < limit; i++) {
+        const url = new URL(resolved.url.href);
+        for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, v);
+        url.searchParams.set(pageParam, String(startPage + i * pageStep));
+        // Credentials last, so the agent can't override them with its own value.
+        for (const [k, v] of Object.entries(registry.getAuthQuery(id))) url.searchParams.set(k, v);
+
+        let res: Response;
+        try {
+          res = await fetch(url, { method: ep.method, headers: { ...registry.getAuthHeaders(id) } });
+        } catch (err) {
+          stopped = `request failed on page ${i}: ${String(err)}`;
+          break;
+        }
+        // Stop rather than push through a 429 — this is hitting a real service
+        // with the user's session, and retrying is how accounts get locked.
+        if (!res.ok) {
+          stopped = `HTTP ${res.status} on page ${i}`;
+          break;
+        }
+
+        let body: unknown;
+        try {
+          body = JSON.parse(await res.text());
+        } catch {
+          stopped = `page ${i} was not JSON`;
+          break;
+        }
+
+        const found = findItems(body, itemsPath);
+        if (!found) {
+          stopped = itemsPath
+            ? `no array at itemsPath "${itemsPath}" on page ${i}`
+            : `couldn't find an array of rows on page ${i} — pass itemsPath`;
+          break;
+        }
+        usedItemsPath = found.path;
+        if (found.items.length === 0) {
+          stopped = `empty page at ${i}`;
+          break;
+        }
+        rows.push(...found.items);
+        pages++; // counted after the empty check, so it means pages that had rows
+
+        if (i < limit - 1) await sleep(WALK_DELAY_MS);
+      }
+
+      if (rows.length === 0) {
+        return toolError(`Collected nothing: ${stopped}. Try get_endpoint to check the response shape.`);
+      }
+
+      const slug = `${ep.host}${ep.pathTemplate}`.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
+      const file = join(OUTPUT_DIR, `${slug}-${Date.now()}.json`);
+      await mkdir(OUTPUT_DIR, { recursive: true });
+      await writeFile(
+        file,
+        JSON.stringify(
+          { endpoint: `${ep.method} ${ep.origin}${ep.pathTemplate}`, collectedAt: new Date().toISOString(), pages, rows: rows.length, items: rows },
+          null,
+          2,
+        ),
+      );
+      log(`walk ${ep.pathTemplate}: ${rows.length} rows over ${pages} pages -> ${file}`);
+
+      return json({
+        pages,
+        rows: rows.length,
+        file,
+        itemsPath: usedItemsPath,
+        stopped,
+        sample: rows[0],
+      });
     },
   );
 
