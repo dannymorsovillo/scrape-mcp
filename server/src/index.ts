@@ -51,7 +51,19 @@ function broadcast(): void {
 // --- WebSocket ingest -------------------------------------------------------
 
 function startWebSocket(): WebSocketServer {
-  wss = new WebSocketServer({ port: WS_PORT });
+  wss = new WebSocketServer({
+    port: WS_PORT,
+    // WebSockets aren't gated by CORS, so any page you happen to have open can
+    // reach ws://localhost:8787 and speak this protocol — reading the registry
+    // or wiping it. Browsers always attach Origin and can't forge it; the
+    // extension's is chrome-extension://<id>. Node clients (the dev tooling and
+    // tests) send no Origin at all, so they still connect.
+    verifyClient: ({ origin }: { origin?: string }) => {
+      if (!origin || origin.startsWith("chrome-extension://")) return true;
+      log(`rejected WebSocket connection from origin ${origin}`);
+      return false;
+    },
+  });
 
   wss.on("connection", (socket) => {
     log("extension connected");
